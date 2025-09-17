@@ -1,0 +1,124 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Ball Dash Multiplayer</title>
+<script src="/socket.io/socket.io.js"></script>
+<style>
+  body { margin:0; overflow:hidden; background:white; font-family:sans-serif; }
+  canvas { display:block; background:white; }
+  #nameInput { position:absolute; top:10px; left:10px; z-index:10; font-size:16px; padding:4px; }
+  #scoreBoard { position:absolute; top:40px; left:10px; z-index:10; font-size:16px; }
+</style>
+</head>
+<body>
+<input type="text" id="nameInput" placeholder="Enter nickname">
+<div id="scoreBoard"></div>
+<canvas id="gameCanvas" width="800" height="600"></canvas>
+
+<script>
+const socket = io();
+const canvas = document.getElementById('gameCanvas');
+const ctx = canvas.getContext('2d');
+
+const playerImg = new Image();
+playerImg.src = 'https://i.imgur.com/MygKYlm.png';
+
+const starImg = new Image();
+starImg.src = 'https://i.imgur.com/mpCVDq8.png';
+
+const goldenStarImg = new Image();
+goldenStarImg.src = 'https://i.imgur.com/mpCVDq8.png';
+
+let players = {};
+let stars = [];
+
+let localPlayer = { x: Math.random()*800, y: Math.random()*600, score:0, name:"Player" };
+const speed = 4;
+
+// Movement controls
+let keys = {};
+document.addEventListener('keydown', e => keys[e.key] = true);
+document.addEventListener('keyup', e => keys[e.key] = false);
+
+// Set nickname
+document.getElementById('nameInput').addEventListener('change', e => {
+  localPlayer.name = e.target.value;
+  socket.emit('setName', e.target.value);
+});
+
+// Initialize game
+socket.on('init', data => {
+  players = data.players;
+  stars = data.stars;
+});
+
+// New player
+socket.on('newPlayer', player => { players[player.id] = player; });
+
+// Remove player
+socket.on('removePlayer', id => { delete players[id]; });
+
+// Update positions
+socket.on('playersUpdate', updated => { players = updated; });
+
+// Update stars
+socket.on('updateStars', updated => { stars = updated; });
+
+function gameLoop() {
+  // Move local player
+  if(keys['w'] || keys['ArrowUp']) localPlayer.y -= speed;
+  if(keys['s'] || keys['ArrowDown']) localPlayer.y += speed;
+  if(keys['a'] || keys['ArrowLeft']) localPlayer.x -= speed;
+  if(keys['d'] || keys['ArrowRight']) localPlayer.x += speed;
+
+  // Keep inside canvas
+  localPlayer.x = Math.max(0, Math.min(canvas.width, localPlayer.x));
+  localPlayer.y = Math.max(0, Math.min(canvas.height, localPlayer.y));
+
+  // Emit position
+  socket.emit('move', {x: localPlayer.x, y: localPlayer.y});
+
+  // Collect stars
+  stars.forEach(star => {
+    let dx = localPlayer.x - star.x;
+    let dy = localPlayer.y - star.y;
+    let dist = Math.sqrt(dx*dx + dy*dy);
+    if(dist < 30) socket.emit('collectStar', star.id);
+  });
+
+  draw();
+  requestAnimationFrame(gameLoop);
+}
+
+// Draw everything
+function draw() {
+  ctx.clearRect(0,0,canvas.width,canvas.height);
+
+  // Draw stars
+  stars.forEach(star => {
+    let img = star.golden ? goldenStarImg : starImg;
+    ctx.drawImage(img, star.x-15, star.y-15, 30,30);
+  });
+
+  // Draw other players
+  for(let id in players) {
+    let p = players[id];
+    ctx.drawImage(playerImg, p.x-20, p.y-20, 40,40);
+  }
+
+  // Draw local player on top
+  ctx.drawImage(playerImg, localPlayer.x-20, localPlayer.y-20, 40,40);
+
+  // Update scoreboard
+  let scoreboard = Object.values(players)
+    .sort((a,b)=>b.score-a.score)
+    .map(p=>`${p.name}: ${p.score}`)
+    .join('<br>');
+  document.getElementById('scoreBoard').innerHTML = scoreboard;
+}
+
+gameLoop();
+</script>
+</body>
+</html>
